@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Save, BookOpen } from "lucide-react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,6 +112,26 @@ export default function SettingsPage() {
             <Save className="w-4 h-4 mr-2" />
             {updateMutation.isPending ? "Saving..." : "Save Changes"}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-4">
+        <CardHeader className="pb-2">
+          <h2 className="text-sm font-semibold">Import Library</h2>
+        </CardHeader>
+        <CardContent>
+          <Button
+            variant="outline"
+            className="w-full justify-start"
+            onClick={() => navigate("/import")}
+            data-testid="button-import-goodreads"
+          >
+            <BookOpen className="w-4 h-4 mr-2" />
+            Import from Goodreads
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2">
+            Upload your Goodreads CSV export to bring in your entire library.
+          </p>
         </CardContent>
       </Card>
 

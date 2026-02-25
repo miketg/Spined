@@ -6,6 +6,8 @@ import { extractTextFromImage } from "./vision";
 import { matchBooksFromOCR } from "./bookMatcher";
 import { embedBook, embedMissingBooks, findSimilarBooks } from "./embeddings";
 import { generateRecommendations } from "./recommendations";
+import multer from "multer";
+import { processGoodreadsImport } from "./goodreadsImport";
 import { db } from "./db";
 import { scanSessions, scanResults, recommendations } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
@@ -53,6 +55,8 @@ function requireAppUser(req: Request, res: Response, next: NextFunction) {
   }
   next();
 }
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 async function searchGoogleBooks(query: string) {
   const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
@@ -567,6 +571,82 @@ export async function registerRoutes(
       res.status(500).json({ message: "Failed to generate embeddings" });
     }
   });
+
+  app.post(
+    "/api/import/goodreads",
+    requireAuth,
+    requireAppUser,
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ message: "CSV file is required" });
+        }
+
+        const csvContent = req.file.buffer.toString("utf-8");
+
+        const firstLine = csvContent.split("\n")[0] || "";
+        if (!firstLine.includes("Title") || !firstLine.includes("Author")) {
+          return res.status(400).json({
+            message:
+              "This doesn't look like a Goodreads export CSV. Expected columns: Title, Author, ISBN, etc.",
+          });
+        }
+
+        const importRecord = await storage.createGoodreadsImport(req.userId!);
+
+        processGoodreadsImport(importRecord.id, req.userId!, csvContent).catch(
+          (err) => log(`Goodreads import async error: ${err.message}`)
+        );
+
+        res.status(201).json({ import: importRecord });
+      } catch (err: any) {
+        log(`Goodreads upload error: ${err.message}`);
+        res.status(500).json({ message: "Failed to start import" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/import/latest",
+    requireAuth,
+    requireAppUser,
+    async (req: Request, res: Response) => {
+      try {
+        const importRecord = await storage.getLatestGoodreadsImport(
+          req.userId!
+        );
+        if (!importRecord) {
+          return res.json({ import: null });
+        }
+        res.json({ import: importRecord });
+      } catch (err: any) {
+        log(`Get latest import error: ${err.message}`);
+        res.status(500).json({ message: "Failed to get import status" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/import/:id",
+    requireAuth,
+    requireAppUser,
+    async (req: Request, res: Response) => {
+      try {
+        const importRecord = await storage.getGoodreadsImport(
+          req.params.id,
+          req.userId!
+        );
+        if (!importRecord) {
+          return res.status(404).json({ message: "Import not found" });
+        }
+        res.json({ import: importRecord });
+      } catch (err: any) {
+        log(`Get import error: ${err.message}`);
+        res.status(500).json({ message: "Failed to get import status" });
+      }
+    }
+  );
 
   return httpServer;
 }

@@ -17,6 +17,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import ScanPage from "@/pages/ScanPage";
 import DiscoverPage from "@/pages/DiscoverPage";
 import CollectionPage from "@/pages/CollectionPage";
+import ImportPage from "@/pages/ImportPage";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 import NotFound from "@/pages/not-found";
@@ -80,6 +81,11 @@ function Router() {
       <Route path="/settings">
         <AuthGuard>
           <AppShell><SettingsPage /></AppShell>
+        </AuthGuard>
+      </Route>
+      <Route path="/import">
+        <AuthGuard>
+          <AppShell><ImportPage /></AppShell>
         </AuthGuard>
       </Route>
       <Route path="/scan">

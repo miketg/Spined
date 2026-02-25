@@ -6,6 +6,7 @@ import {
   userBooks,
   collections,
   collectionBooks,
+  goodreadsImports,
   type User,
   type InsertUser,
   type Book,
@@ -16,6 +17,7 @@ import {
   type InsertCollection,
   type UserBookWithBook,
   type CollectionWithCount,
+  type GoodreadsImport,
 } from "@shared/schema";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
@@ -62,6 +64,10 @@ export interface IStorage {
   deleteCollection(id: string, userId: string): Promise<boolean>;
   addBookToCollection(collectionId: string, bookId: string): Promise<void>;
   removeBookFromCollection(collectionId: string, bookId: string): Promise<void>;
+
+  createGoodreadsImport(userId: string): Promise<GoodreadsImport>;
+  getGoodreadsImport(id: string, userId: string): Promise<GoodreadsImport | undefined>;
+  getLatestGoodreadsImport(userId: string): Promise<GoodreadsImport | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -247,6 +253,32 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(collectionBooks)
       .where(and(eq(collectionBooks.collectionId, collectionId), eq(collectionBooks.bookId, bookId)));
+  }
+
+  async createGoodreadsImport(userId: string): Promise<GoodreadsImport> {
+    const [row] = await db
+      .insert(goodreadsImports)
+      .values({ userId, status: "pending" })
+      .returning();
+    return row;
+  }
+
+  async getGoodreadsImport(id: string, userId: string): Promise<GoodreadsImport | undefined> {
+    const [row] = await db
+      .select()
+      .from(goodreadsImports)
+      .where(and(eq(goodreadsImports.id, id), eq(goodreadsImports.userId, userId)));
+    return row;
+  }
+
+  async getLatestGoodreadsImport(userId: string): Promise<GoodreadsImport | undefined> {
+    const [row] = await db
+      .select()
+      .from(goodreadsImports)
+      .where(eq(goodreadsImports.userId, userId))
+      .orderBy(desc(goodreadsImports.createdAt))
+      .limit(1);
+    return row;
   }
 }
 

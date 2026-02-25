@@ -146,14 +146,14 @@ export default function HomePage() {
               </CardContent>
             </Card>
           </Link>
-          <div onClick={() => toast({ title: "Coming Soon", description: "Goodreads import is in development" })}>
-            <Card className="cursor-pointer hover-elevate opacity-60" data-testid="action-import">
+          <Link href="/import">
+            <Card className="cursor-pointer hover-elevate" data-testid="action-import">
               <CardContent className="flex flex-col items-center justify-center p-4 gap-2">
-                <Upload className="w-5 h-5 text-muted-foreground" />
-                <span className="text-xs font-medium text-center text-muted-foreground">Import</span>
+                <Upload className="w-5 h-5 text-primary" />
+                <span className="text-xs font-medium text-center">Import</span>
               </CardContent>
             </Card>
-          </div>
+          </Link>
         </div>
       </section>
 
