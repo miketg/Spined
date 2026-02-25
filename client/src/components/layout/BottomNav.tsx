@@ -1,6 +1,7 @@
 import { Home, Camera, Library, Compass, UserCircle } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
+import { APP_VERSION } from "@/lib/version";
 
 const navItems = [
   { path: "/", label: "Home", icon: Home },
@@ -18,6 +19,12 @@ export function BottomNav() {
       className="fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-md border-t border-border"
       data-testid="bottom-nav"
     >
+      <span
+        className="absolute left-2 top-1 text-[8px] text-muted-foreground/40 font-mono select-none"
+        data-testid="text-app-version"
+      >
+        {APP_VERSION}
+      </span>
       <div className="max-w-lg mx-auto flex items-end justify-around px-2 pb-[env(safe-area-inset-bottom)]">
         {navItems.map((item) => {
           const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
