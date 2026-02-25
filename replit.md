@@ -8,22 +8,40 @@ Spined is a mobile-first book discovery and library management PWA. Users can se
 ## Tech Stack
 - **Frontend:** React 18 + TypeScript + Vite, Tailwind CSS + shadcn/ui, Zustand (auth state), wouter (routing), TanStack Query (data fetching)
 - **Backend:** Express.js + TypeScript
-- **Database:** PostgreSQL via Drizzle ORM
-- **Auth:** Session-based (express-session) with scrypt password hashing
-- **Book Data:** Open Library API (free, no API key required)
+- **Database:** PostgreSQL via Drizzle ORM (Replit-hosted)
+- **Auth:** Supabase Auth (email/password + Google OAuth). Frontend uses `@supabase/supabase-js`, backend verifies JWTs via `supabaseAdmin.auth.getUser(token)`
+- **Book Data:** Google Books API (requires `GOOGLE_BOOKS_API_KEY` secret)
+
+## Environment Secrets
+- `VITE_SUPABASE_URL` — Supabase project URL (used by frontend)
+- `VITE_SUPABASE_ANON_KEY` — Supabase anonymous key (used by frontend)
+- `SUPABASE_SERVICE_ROLE_KEY` — Supabase service role key (used by backend for JWT verification)
+- `GOOGLE_BOOKS_API_KEY` — Google Books API key (used by backend for book search)
+- `DATABASE_URL` — PostgreSQL connection string (Replit-managed)
+
+## Auth Architecture
+1. Frontend calls `supabase.auth.signInWithPassword()` or `supabase.auth.signUp()` or `supabase.auth.signInWithOAuth({ provider: "google" })`
+2. Supabase returns a JWT access token
+3. Frontend stores the token in Zustand auth store
+4. All API requests include `Authorization: Bearer <token>` header
+5. Backend middleware calls `supabaseAdmin.auth.getUser(token)` to verify and extract the Supabase user ID
+6. Backend maps `supabaseUserId` to local `users` table via `users.supabase_user_id` column
+7. On first login (after signup or OAuth), backend creates a local user profile via `POST /api/auth/signup`
 
 ## Project Structure
 ```
 client/src/
-  App.tsx              # Main app with routing and auth guard
-  hooks/useAuth.ts     # Zustand-based auth store + hooks
+  App.tsx              # Main app with routing, auth guard, Supabase auth state listener
+  lib/supabase.ts      # Supabase client initialization
+  lib/queryClient.ts   # TanStack Query client with auth header injection
+  hooks/useAuth.ts     # Zustand-based auth store + Supabase auth hooks
   components/
     layout/            # AppShell, BottomNav
     library/           # BookCard, StatusBadge
     common/            # StarRating, EmptyState, LoadingSkeleton
   pages/
     HomePage.tsx       # Dashboard with currently reading, queue, goals
-    SearchPage.tsx     # Book search via Open Library API
+    SearchPage.tsx     # Book search via Google Books API
     LibraryPage.tsx    # Book library with filters, sort, search
     BookDetailPage.tsx # Full book detail with rating, review, status
     ProfilePage.tsx    # User profile with reading stats
@@ -31,40 +49,37 @@ client/src/
     ScanPage.tsx       # Placeholder for camera scanning
     DiscoverPage.tsx   # Placeholder for AI recommendations
     CollectionPage.tsx # Collection detail view
-    LoginPage.tsx      # Email/password login
+    LoginPage.tsx      # Email/password + Google OAuth login
     SignupPage.tsx     # Account creation
 
 server/
-  index.ts             # Express entry, seeds database
+  index.ts             # Express entry
   routes.ts            # All API routes (auth, books, library, collections, profile)
+  supabase.ts          # Supabase admin client (service role key)
   storage.ts           # Database storage layer (IStorage interface)
   db.ts                # Drizzle ORM connection
-  seed.ts              # Demo data seeding
+  seed.ts              # Legacy demo data seeding
 
 shared/
   schema.ts            # Drizzle schema + Zod types for all models
 ```
 
 ## Database Schema
-- **users** — Auth + profile (email, username, password, displayName, bio, readingGoal)
-- **books** — Canonical book records (title, authors, cover, page count, etc.)
+- **users** — Profile (supabaseUserId, email, username, password, displayName, bio, readingGoal)
+- **books** — Canonical book records (googleBooksId, openLibraryKey, title, authors, cover, page count, etc.)
 - **user_books** — User-book junction (status, rating, review, progress, dates)
 - **collections** — User-defined book lists
 - **collection_books** — Collection-book junction
 - **goodreads_imports** — Import tracking (stub for future)
 
-## Key Features (Phase 1a - MVP)
-1. **Auth** — Email/password signup/login with session persistence
-2. **Book Search** — Open Library API search with debounced autocomplete
+## Key Features
+1. **Auth** — Supabase email/password + Google OAuth with automatic profile creation
+2. **Book Search** — Google Books API search with debounced autocomplete
 3. **Personal Library** — Grid view with status filters (Reading/Want to Read/Read/DNF), sorting, search
 4. **Book Detail** — Rating (half-star), review, status, progress tracking, favorites, physical location
 5. **Collections** — Custom book lists, displayed as horizontal cards on library page
 6. **Home Dashboard** — Currently reading with progress, reading queue, reading goal, quick actions
 7. **Profile** — Reading stats, settings link, logout
-
-## Demo Account
-- Email: `demo@spined.app`
-- Password: `demo123`
 
 ## Design
 - Primary color: Indigo (#6366f1)

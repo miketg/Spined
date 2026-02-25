@@ -38,12 +38,14 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserBySupabaseId(supabaseUserId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
   verifyPassword(email: string, password: string): Promise<User | null>;
 
   getBook(id: string): Promise<Book | undefined>;
   getBookByOpenLibraryKey(key: string): Promise<Book | undefined>;
+  getBookByGoogleBooksId(googleBooksId: string): Promise<Book | undefined>;
   upsertBook(data: InsertBook): Promise<Book>;
 
   getUserBooks(userId: string): Promise<UserBookWithBook[]>;
@@ -78,6 +80,11 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async getUserBySupabaseId(supabaseUserId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.supabaseUserId, supabaseUserId));
+    return user;
+  }
+
   async createUser(data: InsertUser): Promise<User> {
     const hashedPassword = await hashPassword(data.password);
     const [user] = await db.insert(users).values({ ...data, password: hashedPassword }).returning();
@@ -107,7 +114,16 @@ export class DatabaseStorage implements IStorage {
     return book;
   }
 
+  async getBookByGoogleBooksId(googleBooksId: string): Promise<Book | undefined> {
+    const [book] = await db.select().from(books).where(eq(books.googleBooksId, googleBooksId));
+    return book;
+  }
+
   async upsertBook(data: InsertBook): Promise<Book> {
+    if (data.googleBooksId) {
+      const existing = await this.getBookByGoogleBooksId(data.googleBooksId);
+      if (existing) return existing;
+    }
     if (data.openLibraryKey) {
       const existing = await this.getBookByOpenLibraryKey(data.openLibraryKey);
       if (existing) return existing;

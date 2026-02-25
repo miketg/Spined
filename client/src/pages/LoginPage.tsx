@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { BookOpen, Eye, EyeOff } from "lucide-react";
+import { SiGoogle } from "react-icons/si";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -13,7 +14,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const { toast } = useToast();
   const [, navigate] = useLocation();
 
@@ -89,6 +90,23 @@ export default function LoginPage() {
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-2 text-muted-foreground">or continue with</span>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => loginWithGoogle()}
+              data-testid="button-google-login"
+            >
+              <SiGoogle className="w-4 h-4 mr-2" />
+              Sign in with Google
+            </Button>
             <div className="mt-6 text-center">
               <p className="text-sm text-muted-foreground">
                 Don't have an account?{" "}

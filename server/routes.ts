@@ -1,70 +1,107 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
-import session from "express-session";
 import { storage } from "./storage";
+import { supabaseAdmin } from "./supabase";
 import { log } from "./index";
 
-declare module "express-session" {
-  interface SessionData {
-    userId: string;
+declare global {
+  namespace Express {
+    interface Request {
+      userId?: string;
+      supabaseUserId?: string;
+    }
   }
 }
 
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!req.session.userId) {
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+
+    req.supabaseUserId = user.id;
+
+    const appUser = await storage.getUserBySupabaseId(user.id);
+    if (appUser) {
+      req.userId = appUser.id;
+    }
+
+    next();
+  } catch (err: any) {
+    log(`Auth error: ${err.message}`);
+    return res.status(401).json({ message: "Authentication failed" });
+  }
+}
+
+function requireAppUser(req: Request, res: Response, next: NextFunction) {
+  if (!req.userId) {
+    return res.status(403).json({ message: "User profile not found. Please complete signup." });
   }
   next();
 }
 
-async function searchOpenLibrary(query: string) {
-  const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=20&fields=key,title,author_name,first_publish_year,number_of_pages_median,cover_i,isbn,subject,publisher`;
+async function searchGoogleBooks(query: string) {
+  const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+  const baseUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=20`;
+  const url = apiKey ? `${baseUrl}&key=${apiKey}` : baseUrl;
+
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    log(`Google Books API error: ${res.status} ${res.statusText}`);
+    return [];
+  }
   const data = await res.json();
 
-  return (data.docs || []).map((doc: any) => ({
-    id: doc.key?.replace("/works/", ""),
-    title: doc.title || "Untitled",
-    authors: doc.author_name || ["Unknown Author"],
-    publishedDate: doc.first_publish_year?.toString(),
-    pageCount: doc.number_of_pages_median,
-    coverImageUrl: doc.cover_i
-      ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
-      : null,
-    isbn13: doc.isbn?.find((i: string) => i.length === 13),
-    isbn10: doc.isbn?.find((i: string) => i.length === 10),
-    categories: doc.subject?.slice(0, 5),
-  }));
+  return (data.items || []).map((item: any) => {
+    const info = item.volumeInfo || {};
+    const identifiers = info.industryIdentifiers || [];
+    let coverUrl = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null;
+    if (coverUrl) {
+      coverUrl = coverUrl.replace("http://", "https://").replace("&edge=curl", "");
+    }
+
+    return {
+      id: item.id,
+      title: info.title || "Untitled",
+      subtitle: info.subtitle,
+      authors: info.authors || ["Unknown Author"],
+      publishedDate: info.publishedDate,
+      pageCount: info.pageCount,
+      coverImageUrl: coverUrl,
+      description: info.description,
+      isbn13: identifiers.find((i: any) => i.type === "ISBN_13")?.identifier,
+      isbn10: identifiers.find((i: any) => i.type === "ISBN_10")?.identifier,
+      categories: info.categories,
+      publisher: info.publisher,
+      averageRating: info.averageRating,
+      language: info.language,
+    };
+  });
 }
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  app.use(
-    session({
-      secret: process.env.SESSION_SECRET || "spined-session-secret-dev",
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        httpOnly: true,
-        sameSite: "lax",
-      },
-    })
-  );
 
-  app.post("/api/auth/signup", async (req: Request, res: Response) => {
+  app.post("/api/auth/signup", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { email, username, password, displayName } = req.body;
-      if (!email || !username || !password) {
-        return res.status(400).json({ message: "Email, username and password are required" });
+      const { email, username, displayName } = req.body;
+      if (!email || !username) {
+        return res.status(400).json({ message: "Email and username are required" });
       }
 
-      const existingEmail = await storage.getUserByEmail(email);
-      if (existingEmail) {
-        return res.status(409).json({ message: "Email already in use" });
+      const existingUser = await storage.getUserBySupabaseId(req.supabaseUserId!);
+      if (existingUser) {
+        const { password: _, ...safeUser } = existingUser;
+        return res.json({ user: safeUser });
       }
 
       const existingUsername = await storage.getUserByUsername(username);
@@ -75,8 +112,9 @@ export async function registerRoutes(
       const user = await storage.createUser({
         email,
         username,
-        password,
+        password: "supabase-managed",
         displayName: displayName || username,
+        supabaseUserId: req.supabaseUserId!,
       });
 
       await storage.createCollection({
@@ -87,7 +125,7 @@ export async function registerRoutes(
         sortOrder: 0,
       });
 
-      req.session.userId = user.id;
+      req.userId = user.id;
       const { password: _, ...safeUser } = user;
       res.status(201).json({ user: safeUser });
     } catch (err: any) {
@@ -96,52 +134,25 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/login", async (req: Request, res: Response) => {
-    try {
-      const { email, password } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ message: "Email and password are required" });
-      }
-
-      const user = await storage.verifyPassword(email, password);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid email or password" });
-      }
-
-      req.session.userId = user.id;
-      const { password: _, ...safeUser } = user;
-      res.json({ user: safeUser });
-    } catch (err: any) {
-      log(`Login error: ${err.message}`);
-      res.status(500).json({ message: "Login failed" });
+  app.get("/api/auth/me", requireAuth, async (req: Request, res: Response) => {
+    if (!req.userId) {
+      return res.status(404).json({ message: "Profile not found", needsProfile: true });
     }
-  });
-
-  app.post("/api/auth/logout", (req: Request, res: Response) => {
-    req.session.destroy(() => {
-      res.json({ ok: true });
-    });
-  });
-
-  app.get("/api/auth/me", async (req: Request, res: Response) => {
-    if (!req.session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-    const user = await storage.getUser(req.session.userId);
+    const user = await storage.getUser(req.userId);
     if (!user) {
-      return res.status(401).json({ message: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     }
     const { password: _, ...safeUser } = user;
     res.json({ user: safeUser });
   });
 
-  app.get("/api/books/search", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/books/search", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
       const q = req.query.q as string;
       if (!q || q.length < 2) {
         return res.json({ results: [] });
       }
-      const results = await searchOpenLibrary(q);
+      const results = await searchGoogleBooks(q);
       res.json({ results });
     } catch (err: any) {
       log(`Search error: ${err.message}`);
@@ -149,7 +160,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/library", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/library", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
       const { bookData, status, source } = req.body;
       if (!bookData || !status) {
@@ -157,10 +168,11 @@ export async function registerRoutes(
       }
 
       const book = await storage.upsertBook({
+        googleBooksId: bookData.googleBooksId || bookData.id,
         openLibraryKey: bookData.openLibraryKey,
-        googleBooksId: bookData.googleBooksId,
         title: bookData.title,
         authors: bookData.authors || ["Unknown Author"],
+        subtitle: bookData.subtitle,
         publishedDate: bookData.publishedDate,
         pageCount: bookData.pageCount,
         coverImageUrl: bookData.coverImageUrl,
@@ -168,10 +180,13 @@ export async function registerRoutes(
         isbn13: bookData.isbn13,
         isbn10: bookData.isbn10,
         categories: bookData.categories,
+        publisher: bookData.publisher,
+        averageRating: bookData.averageRating?.toString(),
+        language: bookData.language,
       });
 
       const userBook = await storage.addUserBook({
-        userId: req.session.userId!,
+        userId: req.userId!,
         bookId: book.id,
         status,
         source: source || "search",
@@ -188,9 +203,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/library", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/library", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const books = await storage.getUserBooks(req.session.userId!);
+      const books = await storage.getUserBooks(req.userId!);
       res.json({ books });
     } catch (err: any) {
       log(`Get library error: ${err.message}`);
@@ -198,9 +213,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/library/:id", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/library/:id", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const userBook = await storage.getUserBook(req.params.id, req.session.userId!);
+      const userBook = await storage.getUserBook(req.params.id, req.userId!);
       if (!userBook) {
         return res.status(404).json({ message: "Book not found in library" });
       }
@@ -211,9 +226,9 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/library/:id", requireAuth, async (req: Request, res: Response) => {
+  app.patch("/api/library/:id", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const userBook = await storage.updateUserBook(req.params.id, req.session.userId!, req.body);
+      const userBook = await storage.updateUserBook(req.params.id, req.userId!, req.body);
       if (!userBook) {
         return res.status(404).json({ message: "Book not found" });
       }
@@ -224,9 +239,9 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/library/:id", requireAuth, async (req: Request, res: Response) => {
+  app.delete("/api/library/:id", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const deleted = await storage.deleteUserBook(req.params.id, req.session.userId!);
+      const deleted = await storage.deleteUserBook(req.params.id, req.userId!);
       if (!deleted) {
         return res.status(404).json({ message: "Book not found" });
       }
@@ -237,9 +252,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/collections", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/collections", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const collections = await storage.getCollections(req.session.userId!);
+      const collections = await storage.getCollections(req.userId!);
       res.json({ collections });
     } catch (err: any) {
       log(`Get collections error: ${err.message}`);
@@ -247,9 +262,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/collections/:id", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/collections/:id", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const collection = await storage.getCollection(req.params.id, req.session.userId!);
+      const collection = await storage.getCollection(req.params.id, req.userId!);
       if (!collection) {
         return res.status(404).json({ message: "Collection not found" });
       }
@@ -261,14 +276,14 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/collections", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/collections", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
       const { name, description } = req.body;
       if (!name) {
         return res.status(400).json({ message: "Collection name is required" });
       }
       const collection = await storage.createCollection({
-        userId: req.session.userId!,
+        userId: req.userId!,
         name,
         description,
       });
@@ -279,9 +294,9 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/collections/:id", requireAuth, async (req: Request, res: Response) => {
+  app.patch("/api/collections/:id", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const collection = await storage.updateCollection(req.params.id, req.session.userId!, req.body);
+      const collection = await storage.updateCollection(req.params.id, req.userId!, req.body);
       if (!collection) {
         return res.status(404).json({ message: "Collection not found" });
       }
@@ -291,9 +306,9 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/collections/:id", requireAuth, async (req: Request, res: Response) => {
+  app.delete("/api/collections/:id", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const deleted = await storage.deleteCollection(req.params.id, req.session.userId!);
+      const deleted = await storage.deleteCollection(req.params.id, req.userId!);
       if (!deleted) {
         return res.status(404).json({ message: "Collection not found" });
       }
@@ -303,9 +318,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/collections/:id/books", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/collections/:id/books", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const collection = await storage.getCollection(req.params.id, req.session.userId!);
+      const collection = await storage.getCollection(req.params.id, req.userId!);
       if (!collection) {
         return res.status(404).json({ message: "Collection not found" });
       }
@@ -316,9 +331,9 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/collections/:id/books/:bookId", requireAuth, async (req: Request, res: Response) => {
+  app.delete("/api/collections/:id/books/:bookId", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const collection = await storage.getCollection(req.params.id, req.session.userId!);
+      const collection = await storage.getCollection(req.params.id, req.userId!);
       if (!collection) {
         return res.status(404).json({ message: "Collection not found" });
       }
@@ -329,16 +344,16 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/profile", requireAuth, async (req: Request, res: Response) => {
-    const user = await storage.getUser(req.session.userId!);
+  app.get("/api/profile", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    const user = await storage.getUser(req.userId!);
     if (!user) return res.status(404).json({ message: "User not found" });
     const { password: _, ...safeUser } = user;
     res.json({ user: safeUser });
   });
 
-  app.patch("/api/profile", requireAuth, async (req: Request, res: Response) => {
+  app.patch("/api/profile", requireAuth, requireAppUser, async (req: Request, res: Response) => {
     try {
-      const user = await storage.updateUser(req.session.userId!, req.body);
+      const user = await storage.updateUser(req.userId!, req.body);
       if (!user) return res.status(404).json({ message: "User not found" });
       const { password: _, ...safeUser } = user;
       res.json({ user: safeUser });

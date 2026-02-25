@@ -12,12 +12,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuthStore } from "@/hooks/useAuth";
 import { BookCardSkeleton } from "@/components/common/LoadingSkeleton";
 import type { Book } from "@shared/schema";
 
 interface SearchResult {
   id: string;
   title: string;
+  subtitle?: string;
   authors: string[];
   publishedDate?: string;
   pageCount?: number;
@@ -25,6 +27,10 @@ interface SearchResult {
   description?: string;
   isbn13?: string;
   isbn10?: string;
+  categories?: string[];
+  publisher?: string;
+  averageRating?: number;
+  language?: string;
 }
 
 export default function SearchPage() {
@@ -43,8 +49,12 @@ export default function SearchPage() {
     }
     setLoading(true);
     try {
+      const token = useAuthStore.getState().accessToken;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
       const res = await fetch(`/api/books/search?q=${encodeURIComponent(q)}`, {
         credentials: "include",
+        headers,
       });
       if (res.ok) {
         const data = await res.json();
@@ -70,8 +80,9 @@ export default function SearchPage() {
     try {
       await apiRequest("POST", "/api/library", {
         bookData: {
-          openLibraryKey: book.id,
+          googleBooksId: book.id,
           title: book.title,
+          subtitle: book.subtitle,
           authors: book.authors,
           publishedDate: book.publishedDate,
           pageCount: book.pageCount,
@@ -79,9 +90,13 @@ export default function SearchPage() {
           description: book.description,
           isbn13: book.isbn13,
           isbn10: book.isbn10,
+          categories: book.categories,
+          publisher: book.publisher,
+          averageRating: book.averageRating,
+          language: book.language,
         },
         status,
-        source: "search",
+        source: "google_books",
       });
       setAddedBooks((prev) => new Set(prev).add(book.id));
       queryClient.invalidateQueries({ queryKey: ["/api/library"] });

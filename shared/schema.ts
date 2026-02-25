@@ -19,6 +19,7 @@ import { z } from "zod";
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
+  supabaseUserId: text("supabase_user_id").unique(),
   email: text("email").notNull().unique(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),

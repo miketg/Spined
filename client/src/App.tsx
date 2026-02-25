@@ -4,7 +4,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/layout/AppShell";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, useAuthStore } from "@/hooks/useAuth";
+import { supabase } from "@/lib/supabase";
 import { useEffect } from "react";
 
 import HomePage from "@/pages/HomePage";
@@ -106,6 +107,49 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     fetchUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const store = useAuthStore.getState();
+      if (event === "SIGNED_IN" && session) {
+        store.setAccessToken(session.access_token);
+        store.setSupabaseUserId(session.user.id);
+
+        const res = await fetch("/api/auth/me", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          store.setUser(data.user);
+        } else if (res.status === 404) {
+          const meta = session.user.user_metadata;
+          const signupRes = await fetch("/api/auth/signup", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              email: session.user.email,
+              username: session.user.email?.split("@")[0] || `user_${Date.now()}`,
+              displayName: meta?.full_name || meta?.display_name || session.user.email?.split("@")[0] || "Reader",
+            }),
+          });
+          if (signupRes.ok) {
+            const result = await signupRes.json();
+            store.setUser(result.user);
+          }
+        }
+        store.setLoading(false);
+      } else if (event === "SIGNED_OUT") {
+        store.setUser(null);
+        store.setAccessToken(null);
+        store.setSupabaseUserId(null);
+        store.setLoading(false);
+        queryClient.clear();
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   return <>{children}</>;
