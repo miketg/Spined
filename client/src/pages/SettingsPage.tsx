@@ -18,6 +18,7 @@ export default function SettingsPage() {
   const { toast } = useToast();
 
   const [displayName, setDisplayName] = useState(user?.displayName || "");
+  const [username, setUsername] = useState(user?.username || "");
   const [bio, setBio] = useState(user?.bio || "");
   const [readingGoal, setReadingGoal] = useState(user?.readingGoal?.toString() || "");
 
@@ -39,6 +40,7 @@ export default function SettingsPage() {
   const handleSave = () => {
     updateMutation.mutate({
       displayName,
+      username,
       bio,
       readingGoal: readingGoal ? parseInt(readingGoal) : null,
     });
@@ -66,6 +68,19 @@ export default function SettingsPage() {
               placeholder="Your display name"
               data-testid="input-display-name"
             />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs">Username</Label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">@</span>
+              <Input
+                value={username}
+                onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase())}
+                placeholder="username"
+                className="pl-7"
+                data-testid="input-username"
+              />
+            </div>
           </div>
           <div className="space-y-2">
             <Label className="text-xs">Bio</Label>
@@ -108,10 +123,6 @@ export default function SettingsPage() {
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Email</Label>
             <p className="text-sm" data-testid="text-email">{user?.email}</p>
-          </div>
-          <div className="space-y-2 mt-3">
-            <Label className="text-xs text-muted-foreground">Username</Label>
-            <p className="text-sm" data-testid="text-username">@{user?.username}</p>
           </div>
         </CardContent>
       </Card>

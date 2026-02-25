@@ -140,10 +140,6 @@ export default function ScanPage() {
       });
 
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-
       setMode("scanning");
 
       try {
@@ -204,6 +200,12 @@ export default function ScanPage() {
       // non-blocking
     }
   }, [sessionId, clearInterval_, stopMediaStream]);
+
+  useEffect(() => {
+    if (mode === "scanning" && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [mode]);
 
   useEffect(() => {
     return () => {

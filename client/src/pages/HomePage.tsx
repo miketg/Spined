@@ -5,11 +5,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import { HomePageSkeleton } from "@/components/common/LoadingSkeleton";
 import type { UserBookWithBook } from "@shared/schema";
 
 export default function HomePage() {
   const { user } = useAuth();
+  const { toast } = useToast();
 
   const { data: libraryData, isLoading } = useQuery<{ books: UserBookWithBook[] }>({
     queryKey: ["/api/library"],
@@ -136,25 +138,22 @@ export default function HomePage() {
               </CardContent>
             </Card>
           </Link>
-          <div className="relative">
-            <Card className="opacity-60" data-testid="action-scan">
+          <Link href="/scan">
+            <Card className="cursor-pointer hover-elevate" data-testid="action-scan">
               <CardContent className="flex flex-col items-center justify-center p-4 gap-2">
-                <Camera className="w-5 h-5 text-muted-foreground" />
-                <span className="text-xs font-medium text-center text-muted-foreground">Scan Shelf</span>
-              </CardContent>
-            </Card>
-            <span className="absolute -top-1.5 right-0 text-[9px] bg-amber-500 text-white px-1.5 py-0.5 rounded-full font-medium">
-              Soon
-            </span>
-          </div>
-          <Link href="/settings">
-            <Card className="cursor-pointer hover-elevate" data-testid="action-import">
-              <CardContent className="flex flex-col items-center justify-center p-4 gap-2">
-                <Upload className="w-5 h-5 text-primary" />
-                <span className="text-xs font-medium text-center">Import</span>
+                <Camera className="w-5 h-5 text-primary" />
+                <span className="text-xs font-medium text-center">Scan Shelf</span>
               </CardContent>
             </Card>
           </Link>
+          <div onClick={() => toast({ title: "Coming Soon", description: "Goodreads import is in development" })}>
+            <Card className="cursor-pointer hover-elevate opacity-60" data-testid="action-import">
+              <CardContent className="flex flex-col items-center justify-center p-4 gap-2">
+                <Upload className="w-5 h-5 text-muted-foreground" />
+                <span className="text-xs font-medium text-center text-muted-foreground">Import</span>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </section>
 
