@@ -129,6 +129,36 @@ export const goodreadsImports = pgTable("goodreads_imports", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const scanSessions = pgTable("scan_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  status: text("status").default("active").notNull(),
+  framesProcessed: integer("frames_processed").default(0),
+  booksDetected: integer("books_detected").default(0),
+  booksAdded: integer("books_added").default(0),
+  scanDurationMs: integer("scan_duration_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const scanResults = pgTable("scan_results", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  scanSessionId: uuid("scan_session_id")
+    .references(() => scanSessions.id, { onDelete: "cascade" })
+    .notNull(),
+  googleBooksId: text("google_books_id"),
+  matchedTitle: text("matched_title"),
+  matchedAuthors: text("matched_authors").array(),
+  coverImageUrl: text("cover_image_url"),
+  ocrTextFragments: text("ocr_text_fragments").array(),
+  confidenceScore: numeric("confidence_score", { precision: 4, scale: 3 }),
+  matchTier: text("match_tier"),
+  wasAdded: boolean("was_added").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
@@ -167,6 +197,18 @@ export type InsertCollection = z.infer<typeof insertCollectionSchema>;
 export type CollectionBook = typeof collectionBooks.$inferSelect;
 export type InsertCollectionBook = z.infer<typeof insertCollectionBookSchema>;
 export type GoodreadsImport = typeof goodreadsImports.$inferSelect;
+
+export const insertScanSessionSchema = createInsertSchema(scanSessions).omit({
+  id: true, createdAt: true, completedAt: true,
+});
+export const insertScanResultSchema = createInsertSchema(scanResults).omit({
+  id: true, createdAt: true,
+});
+
+export type ScanSession = typeof scanSessions.$inferSelect;
+export type InsertScanSession = z.infer<typeof insertScanSessionSchema>;
+export type ScanResult = typeof scanResults.$inferSelect;
+export type InsertScanResult = z.infer<typeof insertScanResultSchema>;
 
 export type UserBookWithBook = UserBook & { book: Book };
 export type CollectionWithCount = Collection & { bookCount: number };

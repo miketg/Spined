@@ -87,6 +87,18 @@ shared/
 - Mobile-first layout with bottom tab navigation
 - Max-width container (max-w-lg) centered on larger screens
 
+## Shelf Scanner (Phase 1b)
+- Camera captures frames every 2 seconds
+- Each frame is sent to Google Cloud Vision API for OCR text detection
+- OCR fragments are clustered by x-position (vertical strips = book spines)
+- Each cluster is fuzzy-matched against Google Books API
+- Scoring: 70% title similarity (Levenshtein) + 30% author match
+- Results classified: "want_to_read" (on your list), "already_owned", or "other" (new)
+- Brightness gate skips too-dark/washed-out frames
+- Deduplication via googleBooksId across frames
+- Server files: `server/vision.ts`, `server/bookMatcher.ts`
+- DB tables: `scan_sessions`, `scan_results`
+- JSON body limit increased to 10MB for base64 frame data
+
 ## Stub Pages (Future Phases)
-- **Scan** — Camera-based shelf scanning (Phase 1b)
 - **Discover** — AI-powered recommendations (Phase 1c)

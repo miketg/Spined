@@ -2,6 +2,11 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { supabaseAdmin } from "./supabase";
+import { extractTextFromImage } from "./vision";
+import { matchBooksFromOCR } from "./bookMatcher";
+import { db } from "./db";
+import { scanSessions, scanResults } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import { log } from "./index";
 
 declare global {
@@ -359,6 +364,122 @@ export async function registerRoutes(
       res.json({ user: safeUser });
     } catch (err: any) {
       res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  app.post("/api/scan/frame", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const { image } = req.body;
+      if (!image) {
+        return res.status(400).json({ message: "Image data is required" });
+      }
+
+      const ocrResult = await extractTextFromImage(image);
+      if (ocrResult.fragments.length === 0) {
+        return res.json({ matches: [], fragmentCount: 0 });
+      }
+
+      const matchResults = await matchBooksFromOCR(ocrResult.fragments);
+
+      const userLibrary = await storage.getUserBooks(req.userId!);
+      const libraryMap = new Map<string, string>();
+      for (const ub of userLibrary) {
+        if (ub.book.googleBooksId) {
+          libraryMap.set(ub.book.googleBooksId, ub.status);
+        }
+      }
+
+      const enrichedMatches = matchResults.map(({ book, ocrFragments }) => {
+        const libraryStatus = libraryMap.get(book.googleBooksId);
+        let matchTier: string;
+        if (libraryStatus === "want_to_read") {
+          matchTier = "want_to_read";
+        } else if (libraryStatus) {
+          matchTier = "already_owned";
+        } else {
+          matchTier = "other";
+        }
+
+        return {
+          ...book,
+          ocrFragments,
+          matchTier,
+        };
+      });
+
+      res.json({
+        matches: enrichedMatches,
+        fragmentCount: ocrResult.fragments.length,
+        fullText: ocrResult.fullText.slice(0, 500),
+      });
+    } catch (err: any) {
+      log(`Scan frame error: ${err.message}`);
+      res.status(500).json({ message: "Failed to process frame" });
+    }
+  });
+
+  app.post("/api/scan/sessions", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const [session] = await db
+        .insert(scanSessions)
+        .values({ userId: req.userId!, status: "active" })
+        .returning();
+      res.status(201).json({ session });
+    } catch (err: any) {
+      log(`Create scan session error: ${err.message}`);
+      res.status(500).json({ message: "Failed to create scan session" });
+    }
+  });
+
+  app.patch("/api/scan/sessions/:id", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const { status, framesProcessed, booksDetected, booksAdded, scanDurationMs } = req.body;
+      const [updated] = await db
+        .update(scanSessions)
+        .set({
+          status,
+          framesProcessed,
+          booksDetected,
+          booksAdded,
+          scanDurationMs,
+          completedAt: status === "completed" || status === "cancelled" ? new Date() : undefined,
+        })
+        .where(eq(scanSessions.id, req.params.id))
+        .returning();
+      if (!updated) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+      res.json({ session: updated });
+    } catch (err: any) {
+      log(`Update scan session error: ${err.message}`);
+      res.status(500).json({ message: "Failed to update session" });
+    }
+  });
+
+  app.post("/api/scan/sessions/:id/results", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const { results } = req.body;
+      if (!results || !Array.isArray(results) || results.length === 0) {
+        return res.json({ saved: 0 });
+      }
+
+      const rows = results.map((r: any) => ({
+        scanSessionId: req.params.id,
+        googleBooksId: r.googleBooksId,
+        matchedTitle: r.title,
+        matchedAuthors: r.authors,
+        coverImageUrl: r.coverImageUrl,
+        ocrTextFragments: r.ocrFragments || r.matchedFragments,
+        confidenceScore: r.confidenceScore?.toString(),
+        matchTier: r.matchTier,
+        wasAdded: r.wasAdded || false,
+      }));
+
+      await db.insert(scanResults).values(rows);
+      res.json({ saved: rows.length });
+    } catch (err: any) {
+      log(`Save scan results error: ${err.message}`);
+      res.status(500).json({ message: "Failed to save results" });
     }
   });
 
