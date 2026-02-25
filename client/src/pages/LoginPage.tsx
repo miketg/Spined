@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { APP_VERSION } from "@/lib/version";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { BookOpen, Eye, EyeOff } from "lucide-react";
 import { SiGoogle } from "react-icons/si";
@@ -118,6 +119,7 @@ export default function LoginPage() {
           </CardContent>
         </Card>
       </div>
+      <span className="fixed bottom-2 left-2 text-[8px] text-muted-foreground/40 font-mono select-none" data-testid="text-app-version">{APP_VERSION}</span>
     </div>
   );
 }
