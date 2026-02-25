@@ -17,6 +17,7 @@ Spined is a mobile-first book discovery and library management PWA. Users can se
 - `VITE_SUPABASE_ANON_KEY` — Supabase anonymous key (used by frontend)
 - `SUPABASE_SERVICE_ROLE_KEY` — Supabase service role key (used by backend for JWT verification)
 - `GOOGLE_BOOKS_API_KEY` — Google Books API key (used by backend for book search)
+- `OPENAI_API_KEY` — OpenAI API key (used for embeddings + recommendation reasoning)
 - `DATABASE_URL` — PostgreSQL connection string (Replit-managed)
 
 ## Auth Architecture
@@ -46,18 +47,22 @@ client/src/
     BookDetailPage.tsx # Full book detail with rating, review, status
     ProfilePage.tsx    # User profile with reading stats
     SettingsPage.tsx   # Profile editing, reading goal
-    ScanPage.tsx       # Placeholder for camera scanning
-    DiscoverPage.tsx   # Placeholder for AI recommendations
+    ScanPage.tsx       # Camera shelf scanning (Cloud Vision OCR)
+    DiscoverPage.tsx   # AI-powered recommendations (OpenAI embeddings + GPT-4o-mini)
     CollectionPage.tsx # Collection detail view
     LoginPage.tsx      # Email/password + Google OAuth login
     SignupPage.tsx     # Account creation
 
 server/
   index.ts             # Express entry
-  routes.ts            # All API routes (auth, books, library, collections, profile)
+  routes.ts            # All API routes (auth, books, library, collections, recommendations)
   supabase.ts          # Supabase admin client (service role key)
   storage.ts           # Database storage layer (IStorage interface)
   db.ts                # Drizzle ORM connection
+  embeddings.ts        # OpenAI embedding generation + pgvector similarity search
+  recommendations.ts   # GPT-4o-mini recommendation engine
+  vision.ts            # Google Cloud Vision OCR
+  bookMatcher.ts       # OCR text → book fuzzy matching
   seed.ts              # Legacy demo data seeding
 
 shared/
@@ -71,6 +76,7 @@ shared/
 - **collections** — User-defined book lists
 - **collection_books** — Collection-book junction
 - **goodreads_imports** — Import tracking (stub for future)
+- **recommendations** — AI-generated book recommendations per user (reason, relevanceScore, feedback, sourceBookIds)
 
 ## Key Features
 1. **Auth** — Supabase email/password + Google OAuth with automatic profile creation
@@ -100,5 +106,14 @@ shared/
 - DB tables: `scan_sessions`, `scan_results`
 - JSON body limit increased to 10MB for base64 frame data
 
-## Stub Pages (Future Phases)
-- **Discover** — AI-powered recommendations (Phase 1c)
+## AI Recommendations (Phase 1c)
+- **Embeddings:** OpenAI `text-embedding-3-small` (1536-dim vectors) stored in pgvector `embedding` column on `books` table
+- **Embedding column** is NOT in Drizzle schema (pgvector not natively supported) — uses raw SQL via `db.execute(sql\`...\`)`
+- **Recommendation pipeline:** Load user's top-rated/read books → vector similarity search (cosine distance) → GPT-4o-mini re-ranking with personalized explanations → save to `recommendations` table
+- **Caching:** Recommendations served from DB until user taps "Refresh" or manually triggers `POST /api/recommendations/refresh`
+- **Feedback:** Users can like/dismiss recommendations via `POST /api/recommendations/:id/feedback`
+- **"More Like This":** Book detail page shows similar books via embedding cosine similarity
+- **Background embedding:** Books are auto-embedded when added to library (fire-and-forget)
+- **Batch embedding:** `POST /api/embeddings/generate` embeds all unembedded books (up to 100 per call)
+- Server files: `server/embeddings.ts`, `server/recommendations.ts`
+- DB: `recommendations` table, `embedding` vector(1536) column on `books`, IVFFlat index

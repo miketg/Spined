@@ -159,6 +159,22 @@ export const scanResults = pgTable("scan_results", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const recommendations = pgTable("recommendations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  bookId: uuid("book_id")
+    .references(() => books.id, { onDelete: "cascade" })
+    .notNull(),
+  googleBooksId: text("google_books_id"),
+  reason: text("reason").notNull(),
+  relevanceScore: integer("relevance_score"),
+  sourceBookIds: text("source_book_ids").array(),
+  feedback: text("feedback"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
@@ -209,6 +225,13 @@ export type ScanSession = typeof scanSessions.$inferSelect;
 export type InsertScanSession = z.infer<typeof insertScanSessionSchema>;
 export type ScanResult = typeof scanResults.$inferSelect;
 export type InsertScanResult = z.infer<typeof insertScanResultSchema>;
+
+export const insertRecommendationSchema = createInsertSchema(recommendations).omit({
+  id: true, createdAt: true,
+});
+export type Recommendation = typeof recommendations.$inferSelect;
+export type InsertRecommendation = z.infer<typeof insertRecommendationSchema>;
+export type RecommendationWithBook = Recommendation & { book: Book };
 
 export type UserBookWithBook = UserBook & { book: Book };
 export type CollectionWithCount = Collection & { bookCount: number };

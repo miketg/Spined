@@ -4,9 +4,11 @@ import { storage } from "./storage";
 import { supabaseAdmin } from "./supabase";
 import { extractTextFromImage } from "./vision";
 import { matchBooksFromOCR } from "./bookMatcher";
+import { embedBook, embedMissingBooks, findSimilarBooks } from "./embeddings";
+import { generateRecommendations } from "./recommendations";
 import { db } from "./db";
-import { scanSessions, scanResults } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { scanSessions, scanResults, recommendations } from "@shared/schema";
+import { eq, and } from "drizzle-orm";
 import { log } from "./index";
 
 declare global {
@@ -199,6 +201,9 @@ export async function registerRoutes(
       });
 
       res.status(201).json({ userBook, book });
+
+      embedBook(book.id).catch((err) => log(`Background embed error: ${err.message}`));
+
     } catch (err: any) {
       if (err.message?.includes("duplicate") || err.code === "23505") {
         return res.status(409).json({ message: "Book already in your library" });
@@ -480,6 +485,86 @@ export async function registerRoutes(
     } catch (err: any) {
       log(`Save scan results error: ${err.message}`);
       res.status(500).json({ message: "Failed to save results" });
+    }
+  });
+
+  app.get("/api/recommendations", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const recs = await generateRecommendations(req.userId!);
+      res.json({ recommendations: recs });
+    } catch (err: any) {
+      log(`Get recommendations error: ${err.message}`);
+      res.status(500).json({ message: "Failed to get recommendations" });
+    }
+  });
+
+  app.post("/api/recommendations/refresh", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      await embedMissingBooks();
+      const recs = await generateRecommendations(req.userId!, true);
+      res.json({ recommendations: recs });
+    } catch (err: any) {
+      log(`Refresh recommendations error: ${err.message}`);
+      res.status(500).json({ message: "Failed to refresh recommendations" });
+    }
+  });
+
+  app.post("/api/recommendations/:id/feedback", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const { feedback } = req.body;
+      const [updated] = await db
+        .update(recommendations)
+        .set({ feedback })
+        .where(
+          and(
+            eq(recommendations.id, req.params.id),
+            eq(recommendations.userId, req.userId!)
+          )
+        )
+        .returning();
+      if (!updated) {
+        return res.status(404).json({ message: "Recommendation not found" });
+      }
+      res.json({ recommendation: updated });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to save feedback" });
+    }
+  });
+
+  app.get("/api/books/:bookId/similar", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const { bookId } = req.params;
+      const limit = parseInt(req.query.limit as string) || 5;
+
+      await embedBook(bookId);
+
+      const userLibrary = await storage.getUserBooks(req.userId!);
+      const ownedBookIds = userLibrary.map((ub) => ub.bookId);
+
+      const similar = await findSimilarBooks(bookId, limit, ownedBookIds);
+
+      const similarBooks = [];
+      for (const s of similar) {
+        const book = await storage.getBook(s.id);
+        if (book) {
+          similarBooks.push({ ...book, similarity: s.similarity });
+        }
+      }
+
+      res.json({ books: similarBooks });
+    } catch (err: any) {
+      log(`Similar books error: ${err.message}`);
+      res.status(500).json({ message: "Failed to find similar books" });
+    }
+  });
+
+  app.post("/api/embeddings/generate", requireAuth, requireAppUser, async (req: Request, res: Response) => {
+    try {
+      const count = await embedMissingBooks();
+      res.json({ embedded: count });
+    } catch (err: any) {
+      log(`Embedding generation error: ${err.message}`);
+      res.status(500).json({ message: "Failed to generate embeddings" });
     }
   });
 

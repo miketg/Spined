@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useRoute, useLocation } from "wouter";
+import { useRoute, useLocation, Link } from "wouter";
 import {
   ArrowLeft,
   Heart,
@@ -38,7 +38,7 @@ import { StatusBadge } from "@/components/library/StatusBadge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { UserBookWithBook } from "@shared/schema";
+import type { UserBookWithBook, Book } from "@shared/schema";
 
 export default function BookDetailPage() {
   const [, params] = useRoute("/book/:id");
@@ -53,6 +53,13 @@ export default function BookDetailPage() {
 
   const userBook = data?.userBook;
   const book = userBook?.book;
+
+  const { data: similarData, isLoading: similarLoading } = useQuery<{
+    books: Array<Book & { similarity: number }>;
+  }>({
+    queryKey: ["/api/books", userBook?.bookId, "similar"],
+    enabled: !!userBook?.bookId,
+  });
 
   const updateMutation = useMutation({
     mutationFn: async (updates: Record<string, any>) => {
@@ -304,6 +311,38 @@ export default function BookDetailPage() {
             </p>
           </div>
         )}
+
+        <div>
+          <Label className="text-xs text-muted-foreground mb-2 block">More Like This</Label>
+          {similarLoading ? (
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="w-20 h-28 rounded-md flex-shrink-0" />
+              ))}
+            </div>
+          ) : similarData?.books && similarData.books.length > 0 ? (
+            <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+              {similarData.books.map((similar) => (
+                <Link key={similar.id} href={`/search?q=${encodeURIComponent(similar.title)}`}>
+                  <div className="w-20 flex-shrink-0" data-testid={`similar-book-${similar.id}`}>
+                    <div className="w-20 h-28 rounded-md bg-muted overflow-hidden mb-1">
+                      {similar.coverImageUrl ? (
+                        <img src={similar.coverImageUrl} alt={similar.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <BookOpen className="w-4 h-4 text-muted-foreground/40" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[10px] leading-tight line-clamp-2 font-medium">{similar.title}</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No similar books found yet.</p>
+          )}
+        </div>
 
         <div className="pt-2 pb-4">
           <AlertDialog>
